@@ -22,6 +22,29 @@ class OffPolicyTDLambda():
         self.v_true_value = self.calculate_true_V()
         self.lamb = lamb
 
+    def backward_update(self, s, a, r, s_, d):
+        # old_v_table = np.array(self.v_table)
+        importance_sampling_ratio = self.target_policy / self.behavior_policy if a == 1 \
+            else (1 - self.target_policy) / (1 - self.behavior_policy)
+
+        # calculate TD-ERROR
+        if d:
+            td_error = r - self.v_table[s]
+        else:
+            td_error = r + self.discount * self.v_table[s_] - self.v_table[s]
+
+        # update eligibility trace
+        self.eligibility_trace_table *= self.lamb * self.discount
+        self.eligibility_trace_table[s] += 1
+
+        # update V table
+        for ss in range(self.num_state):
+            self.v_table[ss] += self.step_size * importance_sampling_ratio * td_error * self.eligibility_trace_table[ss]
+
+        RMS = np.sqrt(sum(np.square(self.v_true_value - self.v_table)))
+#         print(old_v_table, self.v_table)
+        return RMS
+
     def forward_update(self, states, actions, rewards, dones):
         old_v_table = np.array(self.v_table)
         next_state = states[:]
@@ -53,29 +76,6 @@ class OffPolicyTDLambda():
 #         print(old_v_table, self.v_table)
         return RMS
 
-    def backward_update(self, s, a, r, s_, d):
-        # old_v_table = np.array(self.v_table)
-        importance_sampling_ratio = self.target_policy / self.behavior_policy if a == 1 \
-            else (1 - self.target_policy) / (1 - self.behavior_policy)
-
-        # calculate TD-ERROR
-        if d:
-            td_error = r - self.v_table[s]
-        else:
-            td_error = r + self.discount * self.v_table[s_] - self.v_table[s]
-
-        # update eligibility trace
-        self.eligibility_trace_table *= self.lamb * self.discount
-        self.eligibility_trace_table[s] += 1
-
-        # update V table
-        for ss in range(self.num_state):
-            self.v_table[ss] += self.step_size * importance_sampling_ratio * td_error * self.eligibility_trace_table[ss]
-
-        RMS = np.sqrt(sum(np.square(self.v_true_value - self.v_table)))
-#         print(old_v_table, self.v_table)
-        return RMS
-
     def action(self):
         return np.random.choice(a=[0, 1], p=[1-self.behavior_policy, self.behavior_policy])
 
@@ -93,64 +93,29 @@ THRESHOLD = 0.00001
 
 alphas = [(a + 1)/50 for a in range(10)]
 behaviors = [0.7]
+# behaviors = [(b + 1)/10 for b in range(9)]
 
 RMS_list = []
 
-f_or_b = 0 # 0 for forward update, 1 for backward update
+f_or_b = 0 # 0 for forward_update, 1 for backward_update
 
-for a,b in itertools.product(alphas, behaviors):
+for a,b in itertools.product(alphas,behaviors):
     print('--for alpha:', a, 'and behavior policy:', b)
-    offpolicy_td0 = OffPolicyTDLambda(num_state=env.n, behavior_policy=b, step_size=a)
+    offpolicy_tdLambda = OffPolicyTDLambda(num_state=env.n, behavior_policy=b, step_size=a)
     RMSs = []
     steps = 0
-    if f_or_b == 0:
-        for i in range(ITER):
-            iter_steps = 0
-            # print('--Episode:', i)
-            s = env.reset()
-            sl = [s,]
-            al =[]
-            rl= []
-            donel =[]
-            while True:
-                action = offpolicy_tdLambda.action()
-                s_, r, d, _ = env.step(action)
-
-                # a, r, s_, done
-                al.append(action)
-                rl.append(r)
-                sl.append(s_)
-                donel.append(d)
-
-                iter_steps += 1
-                steps += 1
-
-                # update the last n-step
-                if d:
-                    for k in range(len(al)):
-                        rms = offpolicy_tdLambda.forward_update(states=sl[k:],
-                                                                actions=al[k:],
-                                                                rewards=rl[k:],
-                                                                dones=donel[k:])
-                        # s_l=sl[-offpolicy_tdn.n:],
-                        # dl=donel[-offpolicy_tdn.n:])
-                        RMSs.append(rms)
-                    break
-
-                s = s_
-    else:
-        for i in range(ITER):
-            # print('--Episode:', i)
-            s = env.reset()
-            while True:
-                action = offpolicy_tdLambda.action()
-                s_, r, d, _ = env.step(action)
-                rms = offpolicy_tdLambda.backward_update(s=s, a=action, r=r, s_=s_, d=d)
-                RMSs.append(rms)
-                if d:
-                    break
-                s = s_
-                steps += 1
+    for i in range(ITER):
+        # print('--Episode:', i)
+        s = env.reset()
+        while True:
+            action = offpolicy_tdLambda.action()
+            s_, r, d, _ = env.step(action)
+            rms = offpolicy_tdLambda.backward_update(s=s, a=action, r=r, s_=s_, d=d)
+            RMSs.append(rms)
+            if d:
+                break
+            s = s_
+            steps += 1
 
     print('After', ITER, 'episodes.')
     print('Estimation of V values:', offpolicy_tdLambda.v_table.tolist(),

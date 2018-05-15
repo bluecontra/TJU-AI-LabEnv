@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import numpy as np
 import itertools
-import WalkEnv as Env
+import WalkEnv.WalkEnv as Env
 
 class OffPolicyTDn():
     def __init__(self, num_state, n, discount=0.9, step_size=0.8, target_policy=0.5, behavior_policy=0.6):
